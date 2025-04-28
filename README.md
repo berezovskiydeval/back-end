@@ -1,70 +1,89 @@
+
 # Back-End Applications
+
+A monorepo with several independent Go services that showcase different architectural styles and integrations.
 
 ---
 
 ## Repository Structure
 
-| Folder | Purpose | Tech Stack |
+| Folder | Purpose | Tech Stack |
 |--------|---------|-----------|
-| **`crud-banana`** | REST API with JWT authentication for the *Banana* entity + log producer to RabbitMQ | Go 1.23, PostgreSQL, RabbitMQ, Viper, Logrus |
-| **`bn-logger-mongo`** | RabbitMQ consumer that writes audit logs to MongoDB | Go 1.23, MongoDB Driver, Envconfig |
-| **`rpc-application`** | gRPC CRUD example (*Product*) with client and server | Go 1.23, gRPC, MongoDB |
+| **`crud-banana`**     | REST API with JWT auth for the *Banana* entity + log producer to RabbitMQ | Go 1.23, PostgreSQL, RabbitMQ, Viper, Logrus |
+| **`bn-logger-mongo`** | RabbitMQ consumer that writes audit logs to MongoDB | Go 1.23, MongoDB Driver, Envconfig |
+| **`rpc-application`** | gRPC CRUD example (*Product*) with client and server | Go 1.23, gRPC, MongoDB |
+| **`crud-task`**    | Task‑management API with Prometheus metrics + Docker Compose stack | Go 1.23, PostgreSQL, Prometheus, Grafana, GORM |
 
 <details>
 <summary>Quick interaction diagram</summary>
 
-The REST service **`crud-banana`** → publishes *LogItem* to ✉︎ RabbitMQ →  
-consumer **`bn-logger-mongo`** → writes to 🗄 MongoDB  
-<br/>The **`rpc-application`** runs separately (pure gRPC, no queue).
+```text
+crud-banana ──▶ RabbitMQ ──▶ bn-logger-mongo ──▶ MongoDB
+          │
+          └──▶ PostgreSQL
+
+crud-task ──▶ PostgreSQL
+          └──▶ Prometheus ──▶ Grafana
+
+rpc-application (pure gRPC) ──▶ MongoDB
+```
 </details>
 
 ---
 
-## Quick Start (local)
+## Quick Start (local)
 
 ```bash
-# 1. Clone the repo
+# 1. Clone the repo
 git clone https://github.com/berezovskiydeval/back-end.git
 cd back-end
+```
 
-# 2. Start the infrastructure (Postgres + Mongo + RabbitMQ)
-docker run -d --name pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
-docker run -d --name mongo -p 27017:27017 mongo:7
-docker run -d --name rabbit -p 5672:5672 -p 15672:15672 rabbitmq:3-management
+### Option A — run each service manually
 
-# 3. Copy example env files and tweak if needed
-cp crud-banana/.env.example crud-banana/.env
-cp bn-logger-mongo/.env.example bn-logger-mongo/.env
-cp rpc-application/rpc-server/.env.example rpc-application/rpc-server/.env
+Spin up infrastructure (Postgres, Mongo, RabbitMQ) any way you like, then:
 
-# 4. Build & run the services
-
-# REST API
-cd crud-banana
-go run ./cmd
+```bash
+# REST API
+cd crud-banana && go run ./cmd
 
 # Logger
-cd ../bn-logger-mongo
-go run ./cmd
+cd ../bn-logger-mongo && go run ./cmd
+
+# gRPC server
+cd ../rpc-application/rpc-server && go run ./cmd
 ```
-### `crud-banana` — REST Service
 
-#### Main Endpoints
+### Option B — Task Service stack (Docker Compose)
 
-| Method | URI                | Description                               |
-|--------|--------------------|-------------------------------------------|
-| `POST` | `/api/auth/signup` | user registration                         |
+```bash
+cd task-service
+cp .env.example .env        # tweak if needed
+docker compose up --build   # backend 8080, PG 5432, Prom 9090, Grafana 3000
+```
+
+---
+
+## Service Details
+
+### `crud-banana` — REST Service
+
+#### Main Endpoints
+
+| Method | URI                | Description                                |
+|--------|--------------------|--------------------------------------------|
+| `POST` | `/api/auth/signup` | user registration                          |
 | `POST` | `/api/auth/signin` | login, returns **access + refresh** tokens |
-| `POST` | `/api/auth/refresh`| refresh tokens                            |
-| `GET`  | `/api/items/`      | list bananas                              |
-| `GET`  | `/api/items/{id}`  | get one banana                            |
-| `POST` | `/api/items/`      | create                                    |
-| `PUT`  | `/api/items/{id}`  | update                                    |
-| `DELETE`| `/api/items/{id}` | delete                                    |
+| `POST` | `/api/auth/refresh`| refresh tokens                             |
+| `GET`  | `/api/items/`      | list bananas                               |
+| `GET`  | `/api/items/{id}`  | get one banana                             |
+| `POST` | `/api/items/`      | create                                     |
+| `PUT`  | `/api/items/{id}`  | update                                     |
+| `DELETE`| `/api/items/{id}` | delete                                     |
 
-> All `/api/items/**` routes require a **Bearer** token (checked by middleware).
+> All `/api/items/**` routes require a **Bearer** token (middleware).
 
-#### Environment Variables
+#### Environment Variables
 
 ```env
 DB_HOST=localhost
@@ -77,27 +96,42 @@ DB_SSLMODE=disable
 RABBIT_URL=amqp://guest:guest@localhost:5672/
 RABBIT_QUEUE=logs
 ```
-HTTP port is set in `configs/config.yml` (default **8080**).
+
+HTTP port is configured in `configs/config.yml` (default **8080**).
 
 ---
 
-### `bn-logger-mongo` — Audit Log Service
+### `bn-logger-mongo` — Audit Log Service
 
-* Subscribes to the RabbitMQ queue, deserialises `LogItem`, and inserts a document into the **audit** collection.  
+* Consumes messages from RabbitMQ, deserialises `LogItem`, and inserts a document into the **audit** collection.  
 * Configured via environment variables with `DB_` and `SERVER_` prefixes.  
-* All dependencies are declared in its `go.mod`.
+* Dependencies are declared in its `go.mod`.
 
 ---
 
-### `rpc-application` — gRPC Example
+### `rpc-application` — gRPC Example
 
 * **Server:** `rpc-application/rpc-server`  
-* **Client:** `rpc-application/rpc-client`
+* **Client:** `rpc-application/rpc-client`  
 
-The protocol is defined in `proto/product.proto`  
-(resulting generated files: `product.pb.go`, `product_grpc.pb.go`).
+Protocol defined in `proto/product.proto`  
+(generated files `product.pb.go`, `product_grpc.pb.go`).
 
-The server persists data in **MongoDB**; connection parameters are read from `.env`.
+The server stores data in **MongoDB**; connection parameters come from `.env`.
 
-cd ../rpc-application/rpc-server
-go run ./cmd
+---
+
+### `task-service` — Task Management + Metrics
+
+* **API** — `POST /tasks` to create a task (`id`, `title`, `description`, `created_at`).  
+* **Database** — PostgreSQL with auto-migration (GORM).  
+* **Metrics** — Prometheus counters & histograms (`tasks_created_total`, `task_creation_duration_seconds`).  
+* **Docker Compose** — backend, PostgreSQL, Prometheus and Grafana.  
+* **Clean Architecture** — domain / repository / service / delivery layers.
+
+See [`task-service/README.md`](task-service/README.md) for full instructions.
+
+---
+## License
+
+**MIT** — free to use for study, demos or pet projects.
