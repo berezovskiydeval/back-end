@@ -129,7 +129,7 @@ The server stores data in **MongoDB**; connection parameters come from `.env`.
 * **Docker Compose** — backend, PostgreSQL, Prometheus and Grafana.  
 * **Clean Architecture** — domain / repository / service / delivery layers.
 
-See [`task-service/README.md`](task-service/README.md) for full instructions.
+See [`crud-task/README.md`](crud-task/README.md) for full instructions.
 
 ---
 ## License
